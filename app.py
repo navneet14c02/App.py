@@ -6,7 +6,7 @@ import google.generativeai as genai
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="SMC Pro Trader", page_icon="🌍", layout="centered")
-st.title("🌍 Universal SMC Scanner")
+st.title("🌍 Universal Scanner")
 st.caption("Indices • Stocks • MCX • Forex • Crypto")
 
 # --- SIDEBAR: SETTINGS ---
