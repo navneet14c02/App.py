@@ -1,90 +1,67 @@
 import streamlit as st
-import time
 import requests
-from dhanhq import dhanhq
 import google.generativeai as genai
 
-# --- PAGE SETUP ---
-st.set_page_config(page_title="SMC AI Trader", page_icon="📈", layout="centered")
-st.title("🤖 SMC Trader - Live Dashboard")
+st.set_page_config(page_title="SMC Auto-Trader", page_icon="🚀", layout="centered")
 
-# --- SIDEBAR (LOGIN) ---
-with st.sidebar:
-    st.subheader("Login Details")
-    client_id = st.text_input("Dhan Client ID", value="1109282855")
-    access_token = st.text_input("Dhan Access Token", type="password")
-    gemini_key = st.text_input("Gemini API Key", type="password")
-    
-    start_button = st.button("Start System")
-    if start_button:
-        st.session_state['running'] = True
-        st.success("System Live! Data fetching started...")
-
-# --- MAIN LOGIC ---
-if 'running' in st.session_state and st.session_state['running']:
-    
-    # Refresh Button (Manual)
-    if st.button("🔄 Refresh Data Now"):
-        st.rerun()
-
-    try:
-        # 1. API Connections Check
-        if not access_token or not gemini_key:
-            st.error("⚠️ Please enter Dhan Token and Gemini Key in Sidebar!")
-            st.stop()
-
-        dhan = dhanhq(client_id, access_token)
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        # --- COLUMNS SETUP ---
-        col1, col2 = st.columns(2)
-
-        # 2. FETCH NIFTY DATA (Dhan)
-        nifty_price = "N/A"
-        with col1:
-            try:
-                data = dhan.get_ltp_data("NSE_INDEX", "INDEX", 13)
-                if data['status'] == 'success':
-                    nifty_price = data['data']['last_price']
-                    st.metric(label="🇮🇳 NIFTY 50", value=f"₹{nifty_price}")
-                else:
-                    st.error("Dhan Token Expired?")
-            except Exception as e:
-                st.error(f"Dhan Error: {e}")
-
-        # 3. FETCH BTC DATA (Binance Public API)
-        btc_price = "N/A"
-        with col2:
-            try:
-                url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-                resp = requests.get(url, timeout=5).json()
-                btc_price = float(resp['price'])
-                st.metric(label="₿ BITCOIN", value=f"${btc_price}")
-            except Exception as e:
-                st.warning("BTC Data Load Fail")
-
-        # 4. GEMINI ANALYSIS (AI Brain)
-        st.write("---")
-        st.subheader("🧠 Gemini SMC Analysis")
-        
-        if nifty_price != "N/A":
-            prompt = (f"Act as an SMC Trader. Nifty is {nifty_price}, Bitcoin is {btc_price}. "
-                      f"Current Time: {time.strftime('%H:%M')}. "
-                      "Is Nifty in Premium or Discount? What is the immediate plan based on 3B'S? "
-                      "Keep it very short (2 lines) and Hindi+English mix.")
-            
-            with st.spinner('AI is thinking...'):
-                try:
-                    response = model.generate_content(prompt)
-                    st.info(f"💡 {response.text}")
-                except Exception as e:
-                    st.error(f"Gemini Error: {e}")
-        else:
-            st.warning("Waiting for Nifty Data to start Analysis...")
-
-    except Exception as e:
-        st.error(f"Major System Error: {e}")
-
+# --- 1. AUTO-LOGIN MAGIC (SECRETS) ---
+# Ye check karega ki kya aapne Settings me keys chhupa rakhi hain?
+if 'general' in st.secrets:
+    client_id = st.secrets['general']['dhan_client_id']
+    access_token = st.secrets['general']['dhan_access_token']
+    gemini_key = st.secrets['general']['gemini_api_key']
+    auto_login = True
 else:
-    st.info("👈 Left Sidebar mein apni Keys daalein aur 'Start System' dabayein.")
+    # Agar secrets nahi mile, toh sidebar me poocho
+    st.sidebar.warning("⚠️ Secrets Not Found! Manual Login required.")
+    client_id = st.sidebar.text_input("Client ID", value="1109282855")
+    access_token = st.sidebar.text_input("Access Token", type="password")
+    gemini_key = st.sidebar.text_input("Gemini Key", type="password")
+    auto_login = False
+
+# --- 2. MAIN APP ---
+st.title("🚀 SMC Auto-Trader")
+
+if st.button("🔄 Check Market Now"):
+    
+    if not access_token or not gemini_key:
+        st.error("❌ Keys Missing! Settings me 'Secrets' add karein.")
+        st.stop()
+
+    # --- DHAN DIRECT CALL ---
+    try:
+        url = "https://api.dhan.co/v2/marketfeed/ltp"
+        headers = {
+            "access-token": access_token,
+            "client-id": client_id,
+            "Content-Type": "application/json"
+        }
+        # Nifty 50 (ID: 13)
+        payload = { "exchangeSegment": "NSE_INDEX", "instrumentId": "13" }
+        
+        resp = requests.post(url, headers=headers, json=payload)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            if data['status'] == 'success':
+                price = data['data']['last_price']
+                st.metric("🇮🇳 NIFTY 50", f"₹{price}")
+                
+                # --- GEMINI ANALYSIS ---
+                genai.configure(api_key=gemini_key)
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                ai_resp = model.generate_content(f"Nifty is {price}. One line SMC advice?")
+                st.info(f"🤖 AI: {ai_resp.text}")
+                
+            else:
+                st.error(f"Dhan Error: {data}")
+        elif resp.status_code == 401:
+            st.error("❌ Token Expired or Invalid! (Secrets update karein)")
+        else:
+            st.error(f"Server Error: {resp.status_code}")
+            
+    except Exception as e:
+        st.error(f"Error: {e}")
+
+if auto_login:
+    st.caption("✅ Auto-Logged in via Secrets")
