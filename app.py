@@ -8,12 +8,10 @@ import pytz
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="SMC Auto-Bot", page_icon="🤖", layout="centered")
-
-# Hide Header
 st.markdown("""<style>.stAppHeader {display:none;}</style>""", unsafe_allow_html=True)
 
-st.title("🤖 SMC Auto-Pilot (Standard Mode)")
-st.caption("🔴 Live Market Monitoring")
+st.title("🤖 SMC Auto-Pilot (Auto-Detect)")
+st.caption("Searching for valid AI models...")
 
 # --- SETTINGS ---
 with st.sidebar:
@@ -24,7 +22,6 @@ with st.sidebar:
     else:
         gemini_key = st.text_input("Gemini API Key", type="password")
 
-    # Index Map
     index_map = {
         "NIFTY 50": "^NSEI",
         "BANK NIFTY": "^NSEBANK",
@@ -35,7 +32,21 @@ with st.sidebar:
     
     auto_run = st.checkbox("✅ Enable Auto-Refresh", value=True)
 
-# --- LOGIC ---
+# --- HELPER: GET WORKING MODEL ---
+def get_valid_model(api_key):
+    """Available models ko check karke valid model return karega"""
+    genai.configure(api_key=api_key)
+    try:
+        # Pehle check karo available models
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                if 'flash' in m.name: return m.name
+                if 'pro' in m.name: return m.name
+        return 'gemini-1.5-flash' # Fallback
+    except:
+        return 'gemini-pro'
+
+# --- MAIN LOOP ---
 price_box = st.empty()
 ai_box = st.empty()
 timer_box = st.empty()
@@ -45,52 +56,53 @@ def get_ist_time():
     return datetime.now(IST).strftime('%H:%M:%S')
 
 if gemini_key and auto_run:
+    
+    # 1. FIND MODEL (Ek baar shuru mein)
+    valid_model_name = get_valid_model(gemini_key)
+    st.toast(f"Connected to AI Model: {valid_model_name}")
+
     while True:
         try:
-            # 1. Fetch Data
+            # 2. FETCH DATA
             stock = yf.Ticker(ticker_symbol)
             data = stock.history(period="1d", interval="1m")
             
             if not data.empty:
                 current_price = round(data['Close'].iloc[-1], 2)
                 
-                # Fetch BTC
                 try:
                     btc_resp = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=2).json()
                     btc_price = round(float(btc_resp['price']), 2)
                 except:
                     btc_price = "Loading..."
 
-                # Display
                 with price_box.container():
                     c1, c2 = st.columns(2)
                     c1.metric(f"🇮🇳 {selected_name}", f"₹{current_price}")
                     c2.metric("₿ BITCOIN", f"${btc_price}")
 
-                # 2. AI ANALYSIS (MODEL NAME CHANGED HERE)
+                # 3. AI ANALYSIS
                 genai.configure(api_key=gemini_key)
-                
-                # *** FIX IS HERE: Changed to 'gemini-pro' ***
-                model = genai.GenerativeModel('gemini-pro') 
+                model = genai.GenerativeModel(valid_model_name) # Using detected name
                 
                 prompt = (
                     f"Time: {get_ist_time()}. {selected_name} is {current_price}. BTC is {btc_price}. "
-                    f"As an SMC Trader, give a strict 2-line Action Plan in Hindi. "
-                    f"Is it Premium or Discount? Check for Inducement."
+                    f"Role: SMC Trader. Strict 2-line Hindi plan. "
+                    f"Is market in Premium or Discount? Watch for Inducement sweep."
                 )
                 
                 with ai_box.container():
                     st.write("---")
                     response = model.generate_content(prompt)
-                    st.info(f"💡 **AI PLAN:**\n\n{response.text}")
+                    st.info(f"💡 **AI PLAN ({valid_model_name}):**\n\n{response.text}")
 
-                # Timer
+                # 4. TIMER
                 for i in range(60, 0, -1):
                     timer_box.caption(f"Refreshing in {i}s...")
                     time.sleep(1)
             
             else:
-                st.warning("Market Data Loading...")
+                price_box.warning("Market Data Loading...")
                 time.sleep(5)
 
         except Exception as e:
