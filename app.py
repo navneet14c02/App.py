@@ -1,128 +1,68 @@
 import streamlit as st
-import time
 import requests
 import google.generativeai as genai
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="SMC Pro Trader", page_icon="⚡", layout="centered")
-st.title("⚡ Direct Trader")
-st.caption("Direct Server Connection • No Library Errors")
+st.set_page_config(page_title="Debug Mode", page_icon="🔧")
+st.title("🔧 SMC System Debugger")
 
-# --- FUNCTION: DIRECT API CALL (No Library Needed) ---
-def get_dhan_price_direct(client_id, access_token, exchange_seg, security_id):
-    try:
-        url = "https://api.dhan.co/v2/marketfeed/ltp" # Dhan Server URL
-        
-        headers = {
-            "access-token": access_token,
-            "client-id": client_id,
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-        
-        payload = {
-            "exchangeSegment": exchange_seg,
-            "instrumentId": str(security_id)
-        }
-        
-        # Direct Request
-        response = requests.post(url, headers=headers, json=payload, timeout=5)
-        data = response.json()
-        
-        if data.get('status') == 'success':
-            return data['data']['last_price']
-        else:
-            return None
-            
-    except Exception as e:
-        st.write(f"Debug Info: {e}")
-        return None
+# --- LOGIN ---
+st.sidebar.header("Login")
+client_id = st.sidebar.text_input("Client ID", value="1109282855")
+access_token = st.sidebar.text_input("New Access Token", type="password")
+gemini_key = st.sidebar.text_input("Gemini Key", type="password")
 
-# --- SIDEBAR: SETTINGS ---
-with st.sidebar:
-    st.header("🔑 Login")
-    client_id = st.text_input("Dhan Client ID", value="1109282855")
-    access_token = st.text_input("Dhan Access Token", type="password")
-    gemini_key = st.text_input("Gemini API Key", type="password")
+if st.sidebar.button("Test Connection"):
+    st.session_state['run'] = True
+
+if 'run' in st.session_state:
     
-    st.markdown("---")
+    # 1. DHAN TEST
+    st.subheader("1. Dhan Connection Test")
     
-    # Selection Menu
-    script_name = st.selectbox("Select Index:", 
-                               ["NIFTY 50", "BANK NIFTY", "FIN NIFTY", "SENSEX"])
+    url = "https://api.dhan.co/v2/marketfeed/ltp"
     
-    # Map Selection to ID
-    script_map = {
-        "NIFTY 50": {"id": "13", "seg": "NSE_INDEX"},
-        "BANK NIFTY": {"id": "25", "seg": "NSE_INDEX"},
-        "FIN NIFTY": {"id": "27", "seg": "NSE_INDEX"},
-        "SENSEX": {"id": "51", "seg": "BSE_INDEX"},
+    headers = {
+        "access-token": access_token,
+        "client-id": client_id,
+        "Content-Type": "application/json"
     }
     
-    selected = script_map[script_name]
-
-    if st.button("🚀 Connect Server"):
-        st.session_state['running'] = True
-
-# --- MAIN DASHBOARD ---
-if 'running' in st.session_state and st.session_state['running']:
+    # Nifty 50 Payload
+    payload = {
+        "exchangeSegment": "NSE_INDEX",
+        "instrumentId": "13"
+    }
     
-    if st.button("🔄 Refresh"):
-        st.rerun()
-
-    # 1. Credentials Check
-    if not access_token or not gemini_key:
-        st.error("⚠️ Token aur Key daalna zaroori hai!")
-        st.stop()
-
-    # 2. GET PRICE (DIRECT MODE)
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        price = get_dhan_price_direct(client_id, access_token, selected['seg'], selected['id'])
+    try:
+        response = requests.post(url, headers=headers, json=payload)
         
-        if price:
-            st.metric(label=f"🇮🇳 {script_name}", value=f"₹{price}")
+        # --- ASLI ERROR YAHAN DIKHEGA ---
+        st.write(f"Status Code: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data['status'] == 'success':
+                price = data['data']['last_price']
+                st.success(f"✅ Success! Nifty Price: ₹{price}")
+            else:
+                st.error(f"❌ Dhan Said No: {data}")
+        elif response.status_code == 401:
+            st.error("❌ 401 Unauthorized: Aapka TOKEN galat hai ya expire ho gaya hai.")
         else:
-            st.error("Data Fetch Fail! Token Check karein.")
-            price = "N/A"
+            st.error(f"❌ Error Detail: {response.text}")
+            
+    except Exception as e:
+        st.error(f"System Error: {e}")
 
-    with col2:
-        # BTC Data
-        try:
-            btc_url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-            btc_data = requests.get(btc_url).json()
-            btc_price = round(float(btc_data['price']), 2)
-            st.metric("₿ BITCOIN", f"${btc_price}")
-        except:
-            btc_price = "Loading..."
-
-    # 3. GEMINI AI ANALYSIS
-    st.write("---")
-    st.subheader(f"🧠 AI Logic")
-    
-    if price != "N/A":
+    # 2. GEMINI TEST
+    st.subheader("2. Gemini AI Test")
+    if gemini_key:
         try:
             genai.configure(api_key=gemini_key)
             model = genai.GenerativeModel('gemini-1.5-flash')
-            
-            prompt = (
-                f"You are a strict SMC Trader. "
-                f"Instrument: {script_name} is at {price}. "
-                f"Global Context: BTC is {btc_price}. "
-                f"Task: Identify if we are in Premium or Discount zone relative to recent range. "
-                f"Check for Inducement (IDM) sweep possibilities. "
-                f"Give a clear 2-line plan in Hindi."
-            )
-            
-            with st.spinner("Analyzing Market Structure..."):
-                response = model.generate_content(prompt)
-                st.info(f"💡 {response.text}")
-                
+            resp = model.generate_content("Say 'Hello Trader'")
+            st.success(f"✅ Gemini is Ready: {resp.text}")
         except Exception as e:
-            st.error(f"AI Error: {e}")
+            st.error(f"❌ Gemini Error: {e}")
     else:
-        st.warning("Waiting for Price Data...")
-
-else:
-    st.info("👈 Login karke 'Connect Server' dabayein.")
+        st.warning("Gemini Key nahi daali.")
