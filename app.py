@@ -1,56 +1,91 @@
 import streamlit as st
+import yfinance as yf
 import requests
+import google.generativeai as genai
 
-st.set_page_config(page_title="Debug Test", layout="centered")
-st.title("🛠️ Dhan Connection Doctor")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="SMC Free Trader", page_icon="🚀", layout="centered")
+st.title("🚀 SMC AI Dashboard (Free Version)")
+st.caption("Powered by Yahoo Finance (No Dhan Token Needed)")
 
-# 1. Yahan Token Paste Karein
-st.write("Niche apna Naya Token paste karein aur button dabayein:")
-user_token = st.text_input("Paste New Access Token Here:", type="password")
+# --- SIDEBAR ---
+with st.sidebar:
+    st.header("⚙️ Settings")
+    gemini_key = st.text_input("Gemini API Key", type="password")
+    
+    # Dropdown for Index
+    index_map = {
+        "NIFTY 50": "^NSEI",
+        "BANK NIFTY": "^NSEBANK",
+        "SENSEX": "^BSESN"
+    }
+    selected_index = st.selectbox("Select Index", list(index_map.keys()))
+    ticker_symbol = index_map[selected_index]
+    
+    if st.button("🔴 Start Tracking"):
+        st.session_state['run'] = True
 
-if st.button("🔴 Test Connection Now"):
-    if not user_token:
-        st.error("Pehle Token toh daalo bhai!")
-    else:
-        # 2. Direct Call to Dhan (No Library)
-        url = "https://api.dhan.co/v2/marketfeed/ltp"
+# --- MAIN DASHBOARD ---
+if 'run' in st.session_state and st.session_state['run']:
+    
+    if st.button("🔄 Refresh Data"):
+        st.rerun()
+
+    # 1. FETCH DATA (YAHOO FINANCE - FREE)
+    try:
+        col1, col2 = st.columns(2)
         
-        headers = {
-            "access-token": user_token,
-            "client-id": "1109282855", # Aapka ID
-            "Content-Type": "application/json"
-        }
+        # Get Nifty/BankNifty Data
+        stock = yf.Ticker(ticker_symbol)
+        data = stock.history(period="1d")
         
-        # Nifty 50 Check
-        payload = {
-            "exchangeSegment": "NSE_INDEX",
-            "instrumentId": "13"
-        }
-        
+        if not data.empty:
+            current_price = round(data['Close'].iloc[-1], 2)
+            
+            with col1:
+                st.metric(label=f"🇮🇳 {selected_index}", value=f"₹{current_price}")
+        else:
+            st.error("Market Data Load Fail (Check Internet)")
+            current_price = None
+
+        # Get Bitcoin Data (Binance - FREE)
+        with col2:
+            try:
+                btc_url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+                btc_resp = requests.get(btc_url).json()
+                btc_price = round(float(btc_resp['price']), 2)
+                st.metric(label="₿ BITCOIN", value=f"${btc_price}")
+            except:
+                btc_price = "Loading..."
+                
+    except Exception as e:
+        st.error(f"Data Error: {e}")
+
+    # 2. GEMINI AI ANALYSIS
+    st.write("---")
+    st.subheader("🧠 SMC AI Analysis")
+
+    if not gemini_key:
+        st.warning("⚠️ Please enter Gemini API Key in Sidebar to get Plan.")
+    elif current_price:
         try:
-            st.info("Sending Request to Dhan...")
-            response = requests.post(url, headers=headers, json=payload)
+            genai.configure(api_key=gemini_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
-            # 3. RESULT DIKHAO (Raw Sach)
-            st.write("---")
-            st.subheader("📡 Server Ka Jawab (Raw Response):")
+            prompt = (
+                f"Act as an SMC Trader. "
+                f"Asset: {selected_index} at Price: {current_price}. "
+                f"Global Context: Bitcoin is {btc_price}. "
+                f"Task: Based on 3B'S (Bias, Base, Liquidity Sweep), give a short trading plan in Hindi. "
+                f"Is the market in Premium or Discount?"
+            )
             
-            # Server kya bol raha hai, wo as-it-is dikhao
-            st.code(response.text)
-            
-            # Analysis
-            if response.status_code == 200:
-                data = response.json()
-                if data['status'] == 'success':
-                    price = data['data']['last_price']
-                    st.success(f"✅ PASS! Connection Jud Gaya! Price: {price}")
-                    st.balloons()
-                else:
-                    st.error("❌ FAIL! Token sahi hai par Data nahi mila.")
-            elif response.status_code == 401:
-                st.error("❌ FAIL (401): Unauthorized. Matlab Token abhi bhi GALAT hai.")
-            else:
-                st.error(f"❌ FAIL ({response.status_code}): Server Error.")
+            with st.spinner("AI Market Ko Read Kar Raha Hai..."):
+                response = model.generate_content(prompt)
+                st.success(f"💡 Plan: {response.text}")
                 
         except Exception as e:
-            st.error(f"System Error: {e}")
+            st.error(f"Gemini Error: {e}")
+
+else:
+    st.info("👈 Sidebar mein Gemini Key daalein aur 'Start' dabayein.")
