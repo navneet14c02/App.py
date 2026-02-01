@@ -5,7 +5,7 @@ import google.generativeai as genai
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="SMC Pro Trader", page_icon="⚡", layout="centered")
-st.title("⚡ SMC Direct Trader")
+st.title("⚡ Direct Trader")
 st.caption("Direct Server Connection • No Library Errors")
 
 # --- FUNCTION: DIRECT API CALL (No Library Needed) ---
@@ -99,7 +99,7 @@ if 'running' in st.session_state and st.session_state['running']:
 
     # 3. GEMINI AI ANALYSIS
     st.write("---")
-    st.subheader(f"🧠 SMC AI Logic")
+    st.subheader(f"🧠 AI Logic")
     
     if price != "N/A":
         try:
