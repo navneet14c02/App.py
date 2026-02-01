@@ -1,4 +1,5 @@
 import streamlit as st
+import time
 import requests
 from dhanhq import dhanhq
 import google.generativeai as genai
