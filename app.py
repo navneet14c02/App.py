@@ -2,67 +2,66 @@ import streamlit as st
 import requests
 import google.generativeai as genai
 
-st.set_page_config(page_title="Debug Mode", page_icon="🔧")
-st.title("🔧 SMC System Debugger")
+st.set_page_config(page_title="SMC Auto-Trader", page_icon="🚀", layout="centered")
 
-# --- LOGIN ---
-st.sidebar.header("Login")
-client_id = st.sidebar.text_input("Client ID", value="1109282855")
-access_token = st.sidebar.text_input("New Access Token", type="password")
-gemini_key = st.sidebar.text_input("Gemini Key", type="password")
+# --- 1. AUTO-LOGIN MAGIC (SECRETS) ---
+# Ye check karega ki kya aapne Settings me keys chhupa rakhi hain?
+if 'general' in st.secrets:
+    client_id = st.secrets['general']['dhan_client_id']
+    access_token = st.secrets['general']['dhan_access_token']
+    gemini_key = st.secrets['general']['gemini_api_key']
+    auto_login = True
+else:
+    # Agar secrets nahi mile, toh sidebar me poocho
+    st.sidebar.warning("⚠️ Secrets Not Found! Manual Login required.")
+    client_id = st.sidebar.text_input("Client ID", value="1109282855")
+    access_token = st.sidebar.text_input("Access Token", type="password")
+    gemini_key = st.sidebar.text_input("Gemini Key", type="password")
+    auto_login = False
 
-if st.sidebar.button("Test Connection"):
-    st.session_state['run'] = True
+# --- 2. MAIN APP ---
+st.title("🚀 SMC Auto-Trader")
 
-if 'run' in st.session_state:
+if st.button("🔄 Check Market Now"):
     
-    # 1. DHAN TEST
-    st.subheader("1. Dhan Connection Test")
-    
-    url = "https://api.dhan.co/v2/marketfeed/ltp"
-    
-    headers = {
-        "access-token": access_token,
-        "client-id": client_id,
-        "Content-Type": "application/json"
-    }
-    
-    # Nifty 50 Payload
-    payload = {
-        "exchangeSegment": "NSE_INDEX",
-        "instrumentId": "13"
-    }
-    
+    if not access_token or not gemini_key:
+        st.error("❌ Keys Missing! Settings me 'Secrets' add karein.")
+        st.stop()
+
+    # --- DHAN DIRECT CALL ---
     try:
-        response = requests.post(url, headers=headers, json=payload)
+        url = "https://api.dhan.co/v2/marketfeed/ltp"
+        headers = {
+            "access-token": access_token,
+            "client-id": client_id,
+            "Content-Type": "application/json"
+        }
+        # Nifty 50 (ID: 13)
+        payload = { "exchangeSegment": "NSE_INDEX", "instrumentId": "13" }
         
-        # --- ASLI ERROR YAHAN DIKHEGA ---
-        st.write(f"Status Code: {response.status_code}")
+        resp = requests.post(url, headers=headers, json=payload)
         
-        if response.status_code == 200:
-            data = response.json()
+        if resp.status_code == 200:
+            data = resp.json()
             if data['status'] == 'success':
                 price = data['data']['last_price']
-                st.success(f"✅ Success! Nifty Price: ₹{price}")
+                st.metric("🇮🇳 NIFTY 50", f"₹{price}")
+                
+                # --- GEMINI ANALYSIS ---
+                genai.configure(api_key=gemini_key)
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                ai_resp = model.generate_content(f"Nifty is {price}. One line SMC advice?")
+                st.info(f"🤖 AI: {ai_resp.text}")
+                
             else:
-                st.error(f"❌ Dhan Said No: {data}")
-        elif response.status_code == 401:
-            st.error("❌ 401 Unauthorized: Aapka TOKEN galat hai ya expire ho gaya hai.")
+                st.error(f"Dhan Error: {data}")
+        elif resp.status_code == 401:
+            st.error("❌ Token Expired or Invalid! (Secrets update karein)")
         else:
-            st.error(f"❌ Error Detail: {response.text}")
+            st.error(f"Server Error: {resp.status_code}")
             
     except Exception as e:
-        st.error(f"System Error: {e}")
+        st.error(f"Error: {e}")
 
-    # 2. GEMINI TEST
-    st.subheader("2. Gemini AI Test")
-    if gemini_key:
-        try:
-            genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            resp = model.generate_content("Say 'Hello Trader'")
-            st.success(f"✅ Gemini is Ready: {resp.text}")
-        except Exception as e:
-            st.error(f"❌ Gemini Error: {e}")
-    else:
-        st.warning("Gemini Key nahi daali.")
+if auto_login:
+    st.caption("✅ Auto-Logged in via Secrets")
