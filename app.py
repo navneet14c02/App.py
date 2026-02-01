@@ -2,129 +2,110 @@ import streamlit as st
 import yfinance as yf
 import requests
 import google.generativeai as genai
-import time
 from datetime import datetime
 import pytz
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Super SMC Scanner", page_icon="🌍", layout="centered")
+st.set_page_config(page_title="SMC Sniper Signals", page_icon="🎯", layout="centered")
 st.markdown("""<style>.stAppHeader {display:none;}</style>""", unsafe_allow_html=True)
 
-st.title("🌍 Universal SMC Scanner")
-st.caption("Crypto • Forex • Indices • Stocks (Free Data)")
+st.title("🎯 SMC Sniper Signals")
+st.caption("🔴 Direct Entry/Exit Calls (No Theory)")
 
-# --- HELPER: AUTO DETECT MODEL (Fix for 404 Error) ---
-def get_valid_model(api_key):
-    genai.configure(api_key=api_key)
-    try:
-        # Check list of models
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                if 'flash' in m.name: return m.name
-                if 'pro' in m.name: return m.name
-        return 'gemini-1.5-flash'
-    except:
-        return 'gemini-pro'
-
-# --- SIDEBAR SETTINGS ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.header("⚙️ Settings")
-    
-    # 1. API Key Check
+    st.header("⚙️ Setup")
     if 'general' in st.secrets:
         gemini_key = st.secrets['general']['gemini_api_key']
-        st.success("✅ Gemini Key Found")
     else:
         gemini_key = st.text_input("Gemini API Key", type="password")
 
-    # 2. THE BIG LIST (Sab kuch yahan hai)
+    # Mode Selection
+    mode = st.radio("Mode:", ["✍️ Manual (Best for Live)", "📡 Auto (Yahoo/Delayed)"])
+
+    # Instrument List
     index_map = {
-        "🇮🇳 NIFTY 50": "^NSEI",
-        "🇮🇳 BANK NIFTY": "^NSEBANK",
-        "🇮🇳 SENSEX": "^BSESN",
-        "₿ BITCOIN (24x7)": "BTC-USD",
-        "Ξ ETHEREUM": "ETH-USD",
-        "🥇 GOLD (Global)": "GC=F",
-        "🛢️ CRUDE OIL": "CL=F",
-        "💵 USD/INR (Forex)": "INR=X",
-        "🏢 RELIANCE IND": "RELIANCE.NS",
-        "🏦 HDFC BANK": "HDFCBANK.NS",
-        "🚗 TATA MOTORS": "TATAMOTORS.NS"
+        "NIFTY 50": "^NSEI",
+        "BANK NIFTY": "^NSEBANK",
+        "BITCOIN": "BTC-USD",
+        "GOLD": "GC=F",
+        "RELIANCE": "RELIANCE.NS"
     }
-    
-    selected_name = st.selectbox("Select Instrument", list(index_map.keys()))
+    selected_name = st.selectbox("Instrument", list(index_map.keys()))
     ticker_symbol = index_map[selected_name]
-    
-    auto_run = st.checkbox("✅ Enable Auto-Refresh", value=True)
 
-# --- MAIN DASHBOARD LOGIC ---
-price_box = st.empty()
-ai_box = st.empty()
-timer_box = st.empty()
+    if st.button("⚡ GENERATE SIGNAL"):
+        st.session_state['run'] = True
 
-def get_ist_time():
-    IST = pytz.timezone('Asia/Kolkata')
-    return datetime.now(IST).strftime('%H:%M:%S')
+# --- HELPER ---
+def get_valid_model(api_key):
+    genai.configure(api_key=api_key)
+    try:
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                if 'flash' in m.name: return m.name
+        return 'gemini-pro'
+    except:
+        return 'gemini-pro'
 
-# System Start
-if gemini_key and auto_run:
+# --- MAIN LOGIC ---
+if 'run' in st.session_state and st.session_state['run']:
     
-    # Model detect karna (One time)
-    valid_model_name = get_valid_model(gemini_key)
+    current_price = 0.0
     
-    while True:
+    # 1. GET PRICE (Manual or Auto)
+    if mode == "✍️ Manual (Best for Live)":
+        current_price = st.number_input("🔴 Enter CURRENT LIVE PRICE:", value=0.0, step=0.1)
+        if current_price == 0:
+            st.warning("Upar Price daalo aur Enter dabao.")
+            st.stop()
+    else:
         try:
-            # A. FETCH DATA (Yahoo Finance)
             stock = yf.Ticker(ticker_symbol)
-            data = stock.history(period="1d", interval="1m") # 1 Minute Data
+            data = stock.history(period="1d", interval="1m")
+            current_price = round(data['Close'].iloc[-1], 2)
+            st.info(f"Auto Price (Yahoo): {current_price} (May be delayed)")
+        except:
+            st.error("Data Error.")
+            st.stop()
+
+    # 2. GET BTC CONTEXT
+    try:
+        btc_resp = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=2).json()
+        btc_price = round(float(btc_resp['price']), 2)
+    except:
+        btc_price = "Unknown"
+
+    # 3. GENERATE SIGNAL (New Aggressive Prompt)
+    if gemini_key:
+        valid_model = get_valid_model(gemini_key)
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel(valid_model)
+        
+        # --- YE HAI ASLI MAGIC (Prompt Change) ---
+        prompt = (
+            f"Act as a STRICT SMC Signal Provider. No explanations. No theory. "
+            f"Instrument: {selected_name}. Current Price: {current_price}. "
+            f"Context: Bitcoin Sentiment is {btc_price}. "
+            f"Task: Provide a Direct Trade Setup based on probability. "
+            f"Output Format (Strictly follow this): "
+            f"1. 🚦 SIGNAL: [BUY / SELL / WAIT] "
+            f"2. 🎯 ENTRY PRICE: [Exact Number] "
+            f"3. 🛑 STOP LOSS: [Exact Number] "
+            f"4. 💰 TARGET: [Exact Number] "
+            f"5. 📉 REASON: [One very short line, e.g., 'Liquidity swept at low']"
+        )
+        
+        st.write("---")
+        with st.spinner("🤖 AI Calculating Entry/Exit..."):
+            response = model.generate_content(prompt)
             
-            if not data.empty:
-                current_price = round(data['Close'].iloc[-1], 2)
-                
-                # B. FETCH GLOBAL CONTEXT (BTC)
-                try:
-                    btc_resp = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=2).json()
-                    btc_price = round(float(btc_resp['price']), 2)
-                except:
-                    btc_price = "Loading..."
-
-                # C. DISPLAY PRICE
-                with price_box.container():
-                    c1, c2 = st.columns(2)
-                    c1.metric(f"📈 {selected_name}", f"₹{current_price}")
-                    c2.metric("₿ BITCOIN Sentiment", f"${btc_price}")
-
-                # D. AI ANALYSIS
-                genai.configure(api_key=gemini_key)
-                model = genai.GenerativeModel(valid_model_name)
-                
-                prompt = (
-                    f"Current Time: {get_ist_time()}. "
-                    f"Instrument: {selected_name} is trading at {current_price}. "
-                    f"Global Context: Bitcoin is {btc_price}. "
-                    f"Role: Expert SMC Trader. "
-                    f"Task: Analyze market structure (Bias, Inducement, 3B'S). "
-                    f"Output: Strict 2-line Action Plan in Hindi. "
-                    f"Is it Premium or Discount?"
-                )
-                
-                with ai_box.container():
-                    st.write("---")
-                    response = model.generate_content(prompt)
-                    st.info(f"💡 **AI PLAN ({get_ist_time()}):**\n\n{response.text}")
-
-                # E. COUNTDOWN TIMER
-                for i in range(60, 0, -1):
-                    timer_box.caption(f"Next Scan in {i} seconds...")
-                    time.sleep(1)
+            # Result ko bada dikhana
+            st.markdown(f"### ⚡ TRADE SETUP for {selected_name}")
+            st.success(response.text)
             
-            else:
-                price_box.warning(f"Waiting for Data... ({selected_name} Market Closed?)")
-                time.sleep(10)
-
-        except Exception as e:
-            st.error(f"Error: {e}")
-            time.sleep(10)
-
-else:
-    st.info("👈 Sidebar mein Key daalein aur 'Enable' karein.")
+            st.caption("Disclaimer: AI prediction. Trade at your own risk.")
+            
+    else:
+        st.error("Key daalo sidebar mein!")
+        
