@@ -1,3 +1,4 @@
-dhanhq
+yfinance
 google-generativeai
 streamlit
+requests
