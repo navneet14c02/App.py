@@ -3,73 +3,92 @@ import time
 import requests
 from dhanhq import dhanhq
 import google.generativeai as genai
-from datetime import datetime
 
-# --- App Interface Settings ---
+# --- PAGE SETUP ---
 st.set_page_config(page_title="SMC AI Trader", page_icon="📈", layout="centered")
+st.title("🤖 SMC Trader - Live Dashboard")
 
-st.title("🚀 SMC AI Mobile Dashboard")
-st.subheader("Dhan + Gemini Live Analysis")
-
-# --- Sidebar: API Keys ---
+# --- SIDEBAR (LOGIN) ---
 with st.sidebar:
-    st.header("🔑 API Setup")
+    st.subheader("Login Details")
     client_id = st.text_input("Dhan Client ID", value="1109282855")
     access_token = st.text_input("Dhan Access Token", type="password")
     gemini_key = st.text_input("Gemini API Key", type="password")
+    
+    start_button = st.button("Start System")
+    if start_button:
+        st.session_state['running'] = True
+        st.success("System Live! Data fetching started...")
 
-# --- Backend Logic ---
-if st.button("Start Live Tracking"):
-    if not access_token or not gemini_key:
-        st.error("Bhai, Token aur Key toh daalo!")
-    else:
-        # Initializing Connections
+# --- MAIN LOGIC ---
+if 'running' in st.session_state and st.session_state['running']:
+    
+    # Refresh Button
+    if st.button("🔄 Refresh Data Now"):
+        st.rerun()
+
+    try:
+        # 1. API Connections Check
+        if not access_token or not gemini_key:
+            st.error("⚠️ Please enter Dhan Token and Gemini Key in Sidebar!")
+            st.stop()
+
         dhan = dhanhq(client_id, access_token)
         genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel('gemini-1.5-flash')
         
-        st.success("System Live Ho Gaya Hai! Kal 9:15 AM par data refresh hoga.")
-        
-        # Placeholder for live data
-        price_col, zone_col = st.columns(2)
-        with price_col:
-            nifty_placeholder = st.empty()
-        with zone_col:
-            status_placeholder = st.empty()
-            
-        ai_suggestion = st.empty()
+        # --- COLUMNS SETUP ---
+        col1, col2 = st.columns(2)
 
-        # Simple Loop (Streamlit style)
-        while True:
+        # 2. FETCH NIFTY DATA (Corrected Method)
+        nifty_price = "N/A"
+        with col1:
             try:
-                # 1. Fetch Nifty Data
-                resp = dhan.get_ltp_data("NSE_INDEX", "INDEX", 13)
-                if resp['status'] == 'success':
-                    price = resp['data']['last_price']
-                    nifty_placeholder.metric("NIFTY 50", f"₹{price}")
-                    
-                    # 2. Get Gemini Analysis
-                    prompt = f"Nifty is at {price}. Based on 3B'S rules (Bias, Base, Below/Above), what is the plan? Answer in short Hindi."
-                    response = model.generate_content(prompt)
-                    
-                    # 3. Update Dashboard
-                    ai_suggestion.info(f"🤖 Gemini Plan: {response.text}")
-                    
-                    # 4. Premium/Discount Logic (Simple)
-                    # Maan lo equilibrium 24300 hai (Example ke liye)
-                    if price < 24300:
-                        status_placeholder.warning("Zone: DISCOUNT 🟢")
-                    else:
-                        status_placeholder.error("Zone: PREMIUM 🔴")
-                        
+                # NEW FIX: Using .ltp() instead of .get_ltp_data()
+                # Params: Exchange Segment, Security ID, Instrument Type
+                data = dhan.ltp("NSE_INDEX", "13", "INDEX")
+                
+                if data['status'] == 'success':
+                    nifty_price = data['data']['last_price']
+                    st.metric(label="🇮🇳 NIFTY 50", value=f"₹{nifty_price}")
                 else:
-                    st.error("Dhan API Connection Error!")
-                
-                # Sleep for 60 seconds
-                import time
-                time.sleep(60)
-                st.rerun() # Refreshing the app
-                
+                    st.error("Dhan Token Issue")
             except Exception as e:
-                st.write(f"Wait... {e}")
-                time.sleep(10)
+                # Fallback for debugging
+                st.error(f"Dhan Error: {e}")
+
+        # 3. FETCH BTC DATA
+        btc_price = "N/A"
+        with col2:
+            try:
+                url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+                resp = requests.get(url, timeout=5).json()
+                btc_price = float(resp['price'])
+                st.metric(label="₿ BITCOIN", value=f"${btc_price}")
+            except Exception as e:
+                st.warning("BTC Load Fail")
+
+        # 4. GEMINI ANALYSIS
+        st.write("---")
+        st.subheader("🧠 Gemini SMC Analysis")
+        
+        if nifty_price != "N/A":
+            prompt = (f"Act as an SMC Trader. Nifty is {nifty_price}, Bitcoin is {btc_price}. "
+                      f"Current Time: {time.strftime('%H:%M')}. "
+                      "Is Nifty in Premium or Discount? What is the immediate plan based on 3B'S? "
+                      "Keep it very short (2 lines) and Hindi+English mix.")
+            
+            with st.spinner('AI is thinking...'):
+                try:
+                    response = model.generate_content(prompt)
+                    st.info(f"💡 {response.text}")
+                except Exception as e:
+                    st.error(f"Gemini Error: {e}")
+        else:
+            st.warning("Waiting for Nifty Data...")
+
+    except Exception as e:
+        st.error(f"Major System Error: {e}")
+
+else:
+    st.info("👈 Keys daalein aur 'Start System' dabayein.")
